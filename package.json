@@ -2,7 +2,12 @@
     "name": "@xuyanfeng/svn",
     "version": "0.0.1",
     "description": "",
+    "author": "xu_yanfeng",
     "typings": "types/index.d.ts",
+    "publishConfig": {
+        "access": "public",
+        "registry": "https://registry.npmjs.org/"
+    },
     "main": "dist/index.js",
     "scripts": {
         "clean": "rimraf dist && rimraf types ",
@@ -12,7 +17,6 @@
         "type": "git",
         "url": "git+https://github.com/tidys/svn.git"
     },
-    "author": "",
     "license": "ISC",
     "bugs": {
         "url": "https://github.com/tidys/svn/issues"
