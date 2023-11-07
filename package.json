@@ -1,0 +1,32 @@
+{
+    "name": "@xuyanfeng/svn",
+    "version": "0.0.1",
+    "description": "",
+    "typings": "types/index.d.ts",
+    "main": "dist/index.js",
+    "scripts": {
+        "clean": "rimraf dist && rimraf types ",
+        "yalc-push": "npm run clean &&tsc && yalc push"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/tidys/svn.git"
+    },
+    "author": "",
+    "license": "ISC",
+    "bugs": {
+        "url": "https://github.com/tidys/svn/issues"
+    },
+    "homepage": "https://github.com/tidys/svn#readme",
+    "devDependencies": {
+        "@types/fs-extra": "^9.0.13",
+        "@types/lodash": "^4.14.191",
+        "@types/node": "^20.8.10"
+    },
+    "dependencies": {
+        "execa": "^5.0.0",
+        "fs-extra": "^11.1.0",
+        "lodash": "^4.17.21",
+        "rimraf": "^5.0.5"
+    }
+}
