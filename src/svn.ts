@@ -1,11 +1,12 @@
-import { FileStatus, SVNOptions } from "./const";
-import { commandSync } from "execa";
-import { existsSync } from "fs";
+import { FileStatus, InfoOptions, SVNOptions, UpdateOptions } from "./const";
+import { ExecaSyncReturnValue, commandSync } from "execa";
+import { existsSync, readdirSync } from "fs";
 import { emptydirSync as emptyDirSync, ensureDirSync } from "fs-extra";
 import { has, merge, toNumber } from "lodash";
 import { join, relative, win32 } from "path";
 
 export class SVNRepoInfo {
+  Exist: boolean = true;
   Error: string = ""; // 如果仓库正常，是不应该出现错误的
   Path: string = "";
   WorkingCopyRootPath: string = "";
@@ -26,6 +27,16 @@ export class SVNRepoInfo {
     for (let i = 0; i < arr.length; i++) {
       const line = arr[i];
       if (line) {
+        // 判断仓库是否存在
+        if (line.startsWith("svn: warning: W170000:")) {
+          this.Exist = false;
+        } else if (line.startsWith("svn: E200009:")) {
+          this.Exist = false;
+        }
+        if (!this.Exist) {
+          return;
+        }
+        // 读取仓库的详细信息
         const dataArr = line.split(": ");
         if (dataArr.length === 2) {
           let val = dataArr[1];
@@ -95,18 +106,15 @@ export class SVN {
     ensureDirSync(dir);
 
     if (checkout) {
-      let hasUpdate = false;
       if (this.existRepo()) {
         if (!this.isSameRepo()) {
           emptyDirSync(this.dir);
-          hasUpdate = this.checkout(options.filter);
+          this.checkout(this.repo, options.filter);
         }
       } else {
-        hasUpdate = this.checkout(options.filter);
+        this.checkout(this.repo, options.filter);
       }
-      if (!hasUpdate) {
-        this.update(options.filter);
-      }
+      this.update({ root: this.dir });
     }
   }
   private setRepo(repo: string) {
@@ -130,7 +138,7 @@ export class SVN {
   }
   // 传递的是绝对路径
   push(files: string[]) {
-    this.update();
+    this.update({ root: this.dir });
     files = files.map((file) => {
       return relative(this.dir, file);
     });
@@ -207,7 +215,7 @@ export class SVN {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const status = this.getFileStatus(file);
-      if (status === FileStatus.NoUnderVerion) {
+      if (status === FileStatus.NoUnderVersion) {
         needAddFiles.push(file);
       }
     }
@@ -236,23 +244,9 @@ export class SVN {
       console.log(stderr);
     }
   }
-  update(subDirs: string[] = []) {
-    // 判断sub dir是否存在
-    const existDirs: string[] = [];
-    for (let i = 0; i < subDirs.length; i++) {
-      const dir = subDirs[i];
-      const b = this.isFileInRepo(dir);
-      if (b) {
-        existDirs.push(dir);
-      } else {
-        console.log(`not exists ${dir}`);
-      }
-    }
-
-    const cmd = `svn update ${existDirs.join(" ")}`;
-    console.log(`${cmd} in ${this.dir}`);
+  private _updateCommand(cmd: string, options: UpdateOptions) {
     try {
-      const { stderr, stdout } = commandSync(cmd, { cwd: this.dir });
+      const { stderr, stdout } = commandSync(cmd, { cwd: options.root });
       if (stdout) {
         console.log(stdout);
       }
@@ -261,8 +255,27 @@ export class SVN {
       }
     } catch (e: any) {
       if (this.dealError(e.stderr)) {
-        this.update();
+        this.update(options);
       }
+    }
+  }
+  update(options: UpdateOptions) {
+    const { dirs, root } = options;
+    if (dirs) {
+      for (let i = 0; i < dirs.length; i++) {
+        const dir = dirs[i];
+        const b = this.isFileInRepo(dir.url);
+        if (b) {
+          const opts = dir.empty ? "--depth empty" : "";
+          const cmd = `svn update ${dir.name} ${opts}`;
+          console.log(`${cmd} in ${root}`);
+          this._updateCommand(cmd, options)
+        } else {
+          console.log(`not exists ${dir}`);
+        }
+      }
+    } else {
+      this._updateCommand(`svn update`, options)
     }
   }
   // 返回值表示是否处理成功，如果处理成功，命令再次尝试下
@@ -305,13 +318,24 @@ export class SVN {
   }
   private useName = "xuyanfeng";
   private password = "fengge20220301";
-  private checkout(filter: string[] | undefined): boolean {
+  private checkout(repo: string, filter: string[] | undefined) {
+    if (!this.isFileInRepo(repo)) {
+      console.log(`un exists repo: ${repo}`);
+      return;
+    }
+    // 检查是否为空
+    const files = readdirSync(this.dir);
+    if (files.length > 0) {
+      console.log(`不是空目录，无法检出:${this.dir}`);
+      return;
+    }
+
     let depth = "";
     const noFilter = typeof filter === undefined;
     if (!noFilter) {
       depth = "--depth empty"; // 先克隆空目录，在update新目录
     }
-    const cmd = `svn checkout ${depth} ${this.repo} ./ --username ${this.useName} --password ${this.password}`;
+    const cmd = `svn checkout ${depth} ${repo} ./ --username ${this.useName} --password ${this.password}`;
     console.log(`${cmd}`);
     const { stderr, stdout } = commandSync(cmd, { cwd: this.dir });
     if (stdout) {
@@ -321,11 +345,27 @@ export class SVN {
       console.log(stderr);
     }
     console.log("checkout success");
-    if (!noFilter) {
-      this.update(filter);
-      return true;
+    if (!noFilter && filter) {
+      // 循环检出带路径的子目录
+      for (let i = 0; i < filter.length; i++) {
+        const dir = filter[i];
+        let arr = dir.split("/");
+        let rootDir = this.dir;
+        let rootRepo = this.repo;
+        while (arr.length) {
+          const curDir = arr.splice(0, 1)[0];
+          this.update({
+            root: rootDir,
+            dirs: [{
+              url: `${rootRepo}/${curDir}`,
+              name: curDir, empty: !!arr.length
+            }]
+          });
+          rootRepo = `${rootRepo}/${curDir}`;
+          rootDir = join(rootDir, curDir);
+        }
+      }
     }
-    return false;
   }
   private existRepo() {
     if (existsSync(this.dir)) {
@@ -338,19 +378,34 @@ export class SVN {
     }
     return false;
   }
+
+  private getSnvInfo(opts: InfoOptions): SVNRepoInfo | null {
+    const { cwd, url } = opts;
+    let cmdReturn: ExecaSyncReturnValue | null = null;
+    if (cwd) {
+      cmdReturn = commandSync(`svn info`, { cwd });
+    } else if (url) {
+      cmdReturn = commandSync(`svn info ${url}`);
+    }
+    if (cmdReturn) {
+      const { stdout, stderr } = cmdReturn;
+      if (stderr) {
+        return null;
+      }
+      if (stdout) {
+        const ret = new SVNRepoInfo();
+        ret.parse(stdout);
+        return ret;
+      }
+    }
+    return null;
+  }
   private getLocalRepoAddress(dir: string): string | null {
     if (existsSync(dir)) {
       try {
-        const { stdout, stderr } = commandSync(`svn info`, { cwd: dir });
-        if (stderr) {
-          return null;
-        }
-        if (stdout) {
-          const ret = new SVNRepoInfo();
-          ret.parse(stdout);
-          if (!ret.Error) {
-            return ret.URL;
-          }
+        const ret = this.getSnvInfo({ cwd: dir });
+        if (ret && !ret.Error) {
+          return ret.URL;
         }
       } catch (e: any) {
         if (this.dealError(e.stderr)) {
@@ -378,6 +433,7 @@ export class SVN {
     return false;
   }
   getFileStatus(file: string) {
+    // 必须是已经克隆的
     const { stdout, stderr } = commandSync(`svn st ${file}`, { cwd: this.dir });
     if (stderr) {
       return FileStatus.Error;
@@ -386,18 +442,25 @@ export class SVN {
       if (existsSync(join(this.dir, file))) {
         return FileStatus.Sync;
       } else {
-        return FileStatus.NoUnderVerion;
+        return FileStatus.NoUnderVersion;
       }
     }
     if (stdout.startsWith("?")) {
-      return FileStatus.NoUnderVerion;
+      return FileStatus.NoUnderVersion;
     }
     if (stdout.startsWith("A")) {
       return FileStatus.Add;
     }
     return FileStatus.Unknow;
   }
-  isFileInRepo(file: string) {
-    return this.getFileStatus(file) !== FileStatus.NoUnderVerion;
+
+  isFileInRepo(repo: string, file?: string) {
+    // 直接从remote取最靠谱
+    const url = file ? join(repo, file) : repo;
+    const ret = this.getSnvInfo({ url: url })
+    if (ret && ret.Exist) {
+      return true;
+    }
+    return false;
   }
 }
