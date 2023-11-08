@@ -211,10 +211,8 @@ export class SVN {
       //console.log(stdout)
     }
   }
-  public static Commit(dir: string, files: string[]) {
-    const cmd = `svn commit `;
-  }
-  private commit(files: string[]) {
+
+  public commit(files: string[]) {
     console.log(`svn commit files to: ${this.repo}`);
     files = files.filter((file) => {
       const status = this.getFileStatus(file);
