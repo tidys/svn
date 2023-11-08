@@ -109,12 +109,46 @@ export class SVN {
       if (this.existRepo()) {
         if (!this.isSameRepo()) {
           emptyDirSync(this.dir);
-          this.checkout(this.repo, options.filter);
+          this.checkout(this.repo, options);
         }
       } else {
-        this.checkout(this.repo, options.filter);
+        this.checkout(this.repo, options);
       }
+      this.checkSubDirectory(options);
       this.update({ root: this.dir });
+    }
+  }
+  private checkSubDirectory(options: SVNOptions) {
+    const { filter } = options;
+    const noFilter = typeof filter === undefined;
+    if (!noFilter && filter) {
+      // 循环检出带路径的子目录
+      for (let i = 0; i < filter.length; i++) {
+        const dir = filter[i];
+        const originArray = dir.split("/");
+        let arr: string[] = [];
+        // 过滤掉空的array
+        originArray.map(item => {
+          if (item) {
+            arr.push(item);
+          }
+        })
+
+        let rootDir = this.dir;
+        let rootRepo = this.repo;
+        while (arr.length) {
+          const curDir = arr.splice(0, 1)[0];
+          this.update({
+            root: rootDir,
+            dirs: [{
+              url: `${rootRepo}/${curDir}`,
+              name: curDir, empty: !!arr.length
+            }]
+          });
+          rootRepo = `${rootRepo}/${curDir}`;
+          rootDir = join(rootDir, curDir);
+        }
+      }
     }
   }
   private setRepo(repo: string) {
@@ -318,7 +352,7 @@ export class SVN {
   }
   private useName = "xuyanfeng";
   private password = "fengge20220301";
-  private checkout(repo: string, filter: string[] | undefined) {
+  private checkout(repo: string, options: SVNOptions) {
     if (!this.isFileInRepo(repo)) {
       console.log(`un exists repo: ${repo}`);
       return;
@@ -331,7 +365,7 @@ export class SVN {
     }
 
     let depth = "";
-    const noFilter = typeof filter === undefined;
+    const noFilter = typeof options.filter === undefined;
     if (!noFilter) {
       depth = "--depth empty"; // 先克隆空目录，在update新目录
     }
@@ -345,27 +379,6 @@ export class SVN {
       console.log(stderr);
     }
     console.log("checkout success");
-    if (!noFilter && filter) {
-      // 循环检出带路径的子目录
-      for (let i = 0; i < filter.length; i++) {
-        const dir = filter[i];
-        let arr = dir.split("/");
-        let rootDir = this.dir;
-        let rootRepo = this.repo;
-        while (arr.length) {
-          const curDir = arr.splice(0, 1)[0];
-          this.update({
-            root: rootDir,
-            dirs: [{
-              url: `${rootRepo}/${curDir}`,
-              name: curDir, empty: !!arr.length
-            }]
-          });
-          rootRepo = `${rootRepo}/${curDir}`;
-          rootDir = join(rootDir, curDir);
-        }
-      }
-    }
   }
   private existRepo() {
     if (existsSync(this.dir)) {
