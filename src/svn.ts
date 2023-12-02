@@ -170,7 +170,10 @@ export class SVN {
     console.error(`invalid repo: ${repo}`);
     process.exit(-1);
   }
-  // 传递的是绝对路径
+  /**
+   * 执行类似svn add & svn commit，将目标文件同步到远程仓库
+   * @param files 绝对路径的文件
+   */
   push(files: string[]) {
     this.update({ root: this.dir });
     files = files.map((file) => {
